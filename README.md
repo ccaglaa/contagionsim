@@ -2,7 +2,7 @@
 
 An agent-based limit order book simulator of how a fund concentrated in illiquid stocks can turn a redemption run into a cross-asset fire sale. Inspired by the 2026 Turkish investment fund crisis. The model is stylized and does not represent any real fund or person.
 
-**Status:** work in progress. M1 (matching engine) and M2 (baseline market: noise traders + market maker) are done.
+**Status:** work in progress. M1 (matching engine), M2 (baseline market) and M3 (fund build-up and forced unwind) are done.
 
 ## Questions
 
@@ -19,6 +19,7 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 python -m pytest
 python experiments/m2_baseline.py     # baseline market, saves results/m2_baseline.png
+python experiments/m3_fund_unwind.py  # fund build-up and unwind, saves results/m3_fund_unwind.png
 ```
 
 ## Layout
@@ -26,7 +27,7 @@ python experiments/m2_baseline.py     # baseline market, saves results/m2_baseli
 ```
 src/contagionsim/orderbook/   limit order book, price-time priority matching
 src/contagionsim/market/      Market (settlement, accounts), Simulation loop, Snapshot
-src/contagionsim/agents/      NoiseTrader, MarketMaker
+src/contagionsim/agents/      NoiseTrader, MarketMaker, ValueTrader, Fund
 src/contagionsim/analysis/    stylized facts of returns
 experiments/                  one script per figure
 tests/                        pytest suite
@@ -50,3 +51,13 @@ tests/                        pytest suite
 - **Market maker** quotes around a reservation price `mid - skew * inventory` with a half-spread that widens with EWMA volatility (a simplified Avellaneda-Stoikov rule), stops quoting the side that would breach its inventory limit, and never crosses the book (post-only).
 - **Baseline result (seed 0, 20k steps):** the book is two-sided 99.9% of the time, the mean spread is 2.5 ticks, and 20-step returns have excess kurtosis of about 33 (fat tails). The market maker takes part in about 11% of the volume, stays profitable, and keeps its inventory within a few hundred shares.
 - **Known gap:** volatility clustering is weak (acf of |r| about 0.04), because noise traders act independently of the past. Feedback agents (fund flows, momentum retail investors) come in M3.
+
+## Design notes (M3)
+
+- **Fund:** NAV = cash - redemptions owed + shares x price. Investors chase performance: every 100 steps, flow = 2% + 2 x (return over the last 5 periods) + noise, capped at +/-10% of NAV.
+- **Reflexive build-up:** the fund invests inflows in its one stock, which pushes the price up. NAV rises and attracts more inflows. The fund's own limit is 25% of free float.
+- **First-mover advantage:** redeemers are paid at today's NAV, and the selling needed to pay them happens afterwards, so the price impact lands on the investors who stay (tested).
+- **Value traders** buy below and sell above a fundamental value, with limited capacity. Short selling is much more limited than buying (500 vs 5,000 shares each), as on BIST. This is why the price can be pushed far above value.
+- **Shock:** a regulator caps holdings at 8% of free float, and 30% of units are redeemed. The fund sells naively, all at once with market orders.
+- **Result (seed 0):** the build-up pushes the price 29% above value. The forced sale of 17,000 shares crashes it to 23% *below* value, a fire-sale discount: value buyers hit their full 25,000-share capacity and cannot absorb more. Remaining investors lose 13% of NAV. Without the shock, the price stays inflated.
+- **Known gaps:** without price limits the crash happens within a single step. Spreads barely widen, because value traders refill the book. Both are addressed in M4 (price limits, circuit breaker, multi-asset contagion).

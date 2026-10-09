@@ -32,13 +32,30 @@ class Market:
         self.book = LimitOrderBook(symbol)
         self.accounts: dict[str, Account] = {}
         self.last_price: int = initial_price
+        # Cash that entered or left from outside the market (initial cash, fund
+        # subscriptions and redemptions). Conservation: sum of all cash == external_cash
+        self.external_cash: int = 0
 
     def register(self, name: str, cash: int = 0, position: int = 0) -> Account:
         if name in self.accounts:
             raise ValueError(f"agent {name!r} already registered")
         account = Account(cash, position)
         self.accounts[name] = account
+        self.external_cash += cash
         return account
+
+    def transfer_external(self, name: str, amount: int) -> None:
+        """Move cash between an account and the outside world (+ in, - out)
+
+        Used for fund subscriptions (+) and redemption payouts (-)
+        An account can never be pushed below zero cash by a transfer
+        """
+        self._check_registered(name)
+        account = self.accounts[name]
+        if account.cash + amount < 0:
+            raise ValueError(f"{name!r} has {account.cash} cash, cannot pay out {-amount}")
+        account.cash += amount
+        self.external_cash += amount
 
     # ------------------------------------------------------------------
     # Order entry (same signatures as the book, plus settlement)
