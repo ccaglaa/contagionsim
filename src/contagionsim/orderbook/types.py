@@ -50,7 +50,7 @@ class Trade:
     sell_order_id: int
     buyer: str
     seller: str
-    aggressor: Side  # side of the incoming order that triggered the trade
+    aggressor: Side | None  # side of the incoming order; None for auction trades
 
 
 @dataclass(frozen=True, slots=True)

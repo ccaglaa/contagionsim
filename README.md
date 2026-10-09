@@ -26,7 +26,7 @@ python experiments/m3_fund_unwind.py  # fund build-up and unwind, saves results/
 
 ```
 src/contagionsim/orderbook/   limit order book, price-time priority matching
-src/contagionsim/market/      Market (settlement, accounts), Simulation loop, Snapshot
+src/contagionsim/market/      Market, Exchange (multi-asset, BIST-style rules), Simulation loops
 src/contagionsim/agents/      NoiseTrader, MarketMaker, ValueTrader, Fund
 src/contagionsim/analysis/    stylized facts of returns
 experiments/                  one script per figure
@@ -61,3 +61,22 @@ tests/                        pytest suite
 - **Shock:** a regulator caps holdings at 8% of free float, and 30% of units are redeemed. The fund sells naively, all at once with market orders.
 - **Result (seed 0):** the build-up pushes the price 29% above value. The forced sale of 17,000 shares crashes it to 23% *below* value, a fire-sale discount: value buyers hit their full 25,000-share capacity and cannot absorb more. Remaining investors lose 13% of NAV. Without the shock, the price stays inflated.
 - **Known gaps:** without price limits the crash happens within a single step. Spreads barely widen, because value traders refill the book. Both are addressed in M4 (price limits, circuit breaker, multi-asset contagion).
+
+## Exchange rules (M4, part 1)
+
+Modeled on Borsa Istanbul. Every value is a parameter in `market/rules.py`.
+
+| Segment | Daily price limit | Stock circuit breaker | Auction after a halt |
+|---|---|---|---|
+| Yildiz Pazar | +/-20% | 10% | 5 min collect + 2 min match |
+| Ana Pazar | +/-15% | 7.5% | 15 min collect + 2 min match |
+| Alt Pazar | +/-10% | 5% | 15 min collect + 2 min match |
+
+- **Daily limit:** measured from the base price (previous close). Orders priced outside the band are rejected, and market orders stop at the band edge, so a stock can be *locked* at limit-down.
+- **Stock circuit breaker:** an order that would trade beyond the trigger, measured from the reference price, halts the stock and starts a call auction. The auction price becomes the new reference.
+- **Call auction:** orders collect without matching, then everything executes at one price. That price maximizes volume, then minimizes the leftover imbalance, then sits closest to the reference price.
+- **Index circuit breaker:** a capitalization-weighted index falling 5% or 7% below the previous close halts every stock for 20 + 5 + 5 minutes. Each stage fires once per day.
+- **Time:** one trading day is 1,000 steps, about 2 steps per minute of an 8-hour session.
+- **Simplifications:** market orders are refused during auctions. The 20-minute index halt also accepts orders, so it is one long collection period. There is no end-of-session rule.
+
+Sources: [Borsa Istanbul tick-size announcement (6/11/2023), via Phillip Capital](https://phillipcapital.com.tr/Files/OfficialAnnouncement/225f6ec0-7684-44eb-ae43-35cb8926eff1.pdf); [Is Yatirim, trading rules notice (price limits and circuit breakers by segment)](https://www.isyatirim.com.tr/tr-tr/Resmi-Duyurular/Documents/İşlem%20Kuralları%20Bildirim%20Formu.pdf); [Midas, circuit breakers on Borsa Istanbul (updated 29/09/2026)](https://www.getmidas.com/destek/borsa-istanbul/bist-piyasa-bilgileri/borsa-istanbulda-devre-kesici-nedir); [Forbes Turkiye, index circuit breaker triggered twice (19/03/2025)](https://www.forbes.com.tr/ekonomi/borsada-islemler-devre-kesicinin-calismasiyla-ikinci-kez-gecici-olarak-durduruldu).

@@ -17,6 +17,7 @@ from typing import Protocol
 import numpy as np
 
 from contagionsim.market.market import Market
+from contagionsim.orderbook import Trade
 
 
 class Agent(Protocol):
@@ -35,6 +36,22 @@ class Snapshot:
     volume: int  # shares traded during this step
     n_trades: int
     imbalance: float | None  # top level
+
+
+def snapshot_of(market: Market, t: int, new_trades: list[Trade]) -> Snapshot:
+    """Market state after step t. During an auction the book is crossed: no quotes reported"""
+    book = market.book
+    quoting = not book.collecting
+    return Snapshot(
+        t=t,
+        best_bid=book.best_bid() if quoting else None,
+        best_ask=book.best_ask() if quoting else None,
+        mid=book.mid() if quoting else None,
+        last_price=market.last_price,
+        volume=sum(tr.quantity for tr in new_trades),
+        n_trades=len(new_trades),
+        imbalance=book.imbalance(1) if quoting else None,
+    )
 
 
 @dataclass
@@ -60,19 +77,7 @@ class Simulation:
         n_before = len(self.market.book.trades)
         for i in self.rng.permutation(len(self.agents)):
             self.agents[i].act(self.t, self.market, self.rng)
-        new_trades = self.market.book.trades[n_before:]
-
-        book = self.market.book
-        snap = Snapshot(
-            t=self.t,
-            best_bid=book.best_bid(),
-            best_ask=book.best_ask(),
-            mid=book.mid(),
-            last_price=self.market.last_price,
-            volume=sum(tr.quantity for tr in new_trades),
-            n_trades=len(new_trades),
-            imbalance=book.imbalance(1),
-        )
+        snap = snapshot_of(self.market, self.t, self.market.book.trades[n_before:])
         self.history.append(snap)
         for name, series in self.positions.items():
             series.append(self.market.accounts[name].position)
