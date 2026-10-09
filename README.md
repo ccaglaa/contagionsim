@@ -2,7 +2,7 @@
 
 An agent-based limit order book simulator of how a fund concentrated in illiquid stocks can turn a redemption run into a cross-asset fire sale. Inspired by the 2026 Turkish investment fund crisis. The model is stylized and does not represent any real fund or person.
 
-**Status:** work in progress. M1 to M5 are done: matching engine, baseline market, fund build-up and unwind, multi-asset contagion with BIST-style rules, Q1 phase diagram, Q3 VaR backtest.
+**Status:** work in progress. Done: matching engine, baseline market, fund build-up and unwind, multi-asset contagion with BIST-style rules, Q1 phase diagram, Q2 liquidation schedules, Q3 VaR backtest. Next: Q3 policy experiment, Q4 early warning.
 
 ## Questions
 
@@ -22,6 +22,7 @@ python experiments/m2_baseline.py     # baseline market, saves results/m2_baseli
 python experiments/m3_fund_unwind.py  # fund build-up and unwind, saves results/m3_fund_unwind.png
 python experiments/m4_contagion.py    # contagion to the index, saves results/m4_contagion.png
 python experiments/q1_phase_diagram.py  # Q1 heatmap, 108 runs on all CPU cores (~3 min)
+python experiments/q2_liquidation.py    # Q2 liquidation schedules, 60 runs (~3 min on 8 cores)
 python experiments/q3_var_backtest.py   # Q3 VaR backtest, 20 runs (~1 min on 8 cores)
 python -m pytest -m "not slow"        # quick test run (skips the ~30 s scenario test)
 ```
@@ -32,7 +33,8 @@ python -m pytest -m "not slow"        # quick test run (skips the ~30 s scenario
 src/contagionsim/orderbook/   limit order book, price-time priority matching
 src/contagionsim/market/      Market, Exchange (multi-asset, BIST-style rules), Simulation loops
 src/contagionsim/agents/      NoiseTrader, MarketMaker, ValueTrader, Fund, PortfolioFund
-src/contagionsim/scenarios.py mini BIST setup shared by experiments and tests
+src/contagionsim/execution/   liquidation schedules (immediate, TWAP, Almgren-Chriss)
+src/contagionsim/scenarios.py mini BIST setup and news shocks, shared by experiments and tests
 src/contagionsim/analysis/    stylized facts, contagion metrics, VaR models and backtests
 src/contagionsim/sweep.py     parallel parameter sweeps (one process per CPU core)
 experiments/                  one script per figure
@@ -127,6 +129,29 @@ Seed 0: the fund sold 17,000 CORNER shares and 124,679 liquid shares. Here the r
 - **Concentration amplifies the damage.** At 60% redemption, the liquid stocks fall 7.9% at 5% concentration but about 12.7% at 20% to 30%.
 - **Diversion grows with concentration.** The gap between CORNER's portfolio weight and its share of sales rises from under 1 percentage point at 5% concentration to about 15 at 30%. The more the fund is locked into the cornered stock, the more its selling lands on everything else.
 - **Uncertainty:** 3 seeds per cell is a small sample. The 10% concentration row at 30% redemption (0 of 3 seeds, against 2 of 3 at 5%) is within noise. Use `--seeds 10` for tighter estimates.
+
+## Q2: How should a forced seller liquidate?
+
+`experiments/q2_liquidation.py` runs the M4 shock (CORNER cap cut to 8% plus 30% redemptions) with the fund following one of six liquidation schedules (`execution/schedules.py`):
+
+- **immediate:** sell everything at once (the M4 fund).
+- **TWAP:** equal amounts per step over half a day, 1 day or 3 days.
+- **Almgren-Chriss over 3 days:** the optimal trajectory `x(u) = X sinh(k(1-u)) / sinh(k)`, with urgency `k = kappa T` and `kappa = sqrt(lambda sigma^2 / eta)`. A low `k` gives back TWAP; a high `k` front-loads the selling toward immediate.
+
+There are two scenarios: a pure fire sale, and **bad news**, where the market learns at the shock that CORNER is worth 20% less. Each cell uses 5 seeds.
+
+**Two costs.**
+- **Cost to the fund:** sale loss against fair value, as a % of NAV. Negative means the fund sold above fair value. Fair value is used instead of NAV because a slow seller's unsold shares are marked at inflated market prices, which would flatter it.
+- **Cost to the market:** the drawdown of the liquid stocks.
+
+![Q2 liquidation schedules](results/q2_liquidation.png)
+
+**Findings (5 seeds).**
+- **Dumping is dominated.** It is worst for the fund and worst for the market, and it trips the 5% index breaker in every seed.
+- **Spreading over just half a day removes the contagion.** The liquid stocks' drawdown falls from 6.9% to 1.7%, the no-shock level, and the index breaker fires in no seed. Longer horizons keep helping the fund (TWAP over 3 days is best), while the market cost is already at baseline.
+- **Almgren-Chriss behaves as the theory says.** Patient (k=3) is close to TWAP over 3 days; urgent (k=10) is close to TWAP over half a day.
+- **The classic trade-off barely appears.** Almgren-Chriss balances price impact against the risk of waiting. Here waiting is cheap, even with bad news: impact is mostly temporary (value traders restore prices), and bad news is absorbed slowly because shorting is constrained and nobody else is selling.
+- **Caveats.** This is the main limitation of the result: with other forced or informed sellers running for the exit (a real run), waiting would cost more and the trade-off would return. Also, a slower fund pays redeemers later. In reality fund settlement takes a few days, so half a day to 3 days is realistic, but longer would not be.
 
 ## Q3: What do standard risk models miss?
 

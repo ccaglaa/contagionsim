@@ -14,6 +14,7 @@ from numpy.typing import NDArray
 
 from contagionsim.agents import PortfolioFund
 from contagionsim.market import ExchangeSimulation
+from contagionsim.scenarios import FUNDAMENTAL
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,7 +24,13 @@ class ContagionMetrics:
     index_drawdown: float
     index_breaker_5: bool  # the 5% index circuit breaker fired after the shock
     index_breaker_7: bool
-    nav_drawdown: float  # fund NAV per unit, for the investors who stayed
+    nav_drawdown: float  # fund NAV per unit, for the investors who stayed: worst point
+    nav_end_change: float  # ... and at the end of the run
+    execution_discount: float  # 1 - proceeds / (shares sold x pre-shock price)
+    # (value of shares sold at fair value - cash received) / NAV before the shock.
+    # Positive = the fund sold below what the shares were worth. Unlike NAV, it cannot
+    # be flattered by marking unsold shares at an inflated market price
+    sale_loss_vs_value: float
     concentrated_weight: float  # concentrated stock's share of the fund's stock holdings (value)
     concentrated_share_of_sales: float  # its share of the value sold after the shock
     fund_failed: bool
@@ -39,8 +46,12 @@ def _drawdown(path: NDArray[np.float64], t: int) -> float:
 
 
 def contagion_metrics(
-    sim: ExchangeSimulation, fund: PortfolioFund, t_shock: int
+    sim: ExchangeSimulation,
+    fund: PortfolioFund,
+    t_shock: int,
+    fair_values: dict[str, float] | None = None,
 ) -> ContagionMetrics:
+    """fair_values: ticks per share after the shock (default: every stock at FUNDAMENTAL)"""
     if not 0 < t_shock < len(sim.history):
         raise ValueError("t_shock must fall inside the simulated history")
     h = sim.history
@@ -64,6 +75,12 @@ def contagion_metrics(
         for s, q in r.sold.items():
             sold_value[s] += q * snap.assets[s].last_price
     total_sold = sum(sold_value.values())
+    pre_value = sum(r.sold.get(s, 0) * prices[s] for r in fund.records[t_shock:] for s in prices)
+    received = sum(sum(r.proceeds.values()) for r in fund.records[t_shock:])
+    fair = {s: float(FUNDAMENTAL) for s in prices}
+    fair.update(fair_values or {})
+    fair_value_sold = sum(r.sold.get(s, 0) * fair[s] for r in fund.records[t_shock:] for s in fair)
+    nav_before = fund.records[t_shock - 1].nav_per_unit * fund.units_history[t_shock - 1]
 
     return ContagionMetrics(
         concentrated_drawdown=_drawdown(corner, t_shock),
@@ -72,6 +89,9 @@ def contagion_metrics(
         index_breaker_5=0.05 in breakers,
         index_breaker_7=0.07 in breakers,
         nav_drawdown=float(np.nanmin(nav[t_shock:]) / nav[t_shock - 1] - 1.0),
+        nav_end_change=float(nav[-1] / nav[t_shock - 1] - 1.0),
+        execution_discount=1.0 - received / pre_value if pre_value else 0.0,
+        sale_loss_vs_value=(fair_value_sold - received) / nav_before if nav_before else 0.0,
         concentrated_weight=held_value[c] / total_held if total_held else 0.0,
         concentrated_share_of_sales=sold_value[c] / total_sold if total_sold else 0.0,
         fund_failed=fund.failed_at is not None,
