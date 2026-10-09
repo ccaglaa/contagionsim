@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.26",
+    "scipy>=1.11",
 ]
 
 [project.optional-dependencies]
@@ -44,3 +45,7 @@ ignore = ["SIM108"]  # if/else blocks are often clearer than ternaries
 python_version = "3.10"
 strict = true
 files = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["scipy", "scipy.*"]
+ignore_missing_imports = true  # scipy ships without type information

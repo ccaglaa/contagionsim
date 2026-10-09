@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 import numpy as np
+from numpy.typing import NDArray
 
 from contagionsim.agents import PortfolioFund
 from contagionsim.market import ExchangeSimulation
@@ -32,9 +33,9 @@ class ContagionMetrics:
         return asdict(self)
 
 
-def _drawdown(path: np.ndarray, t: int) -> float:
+def _drawdown(path: NDArray[np.float64], t: int) -> float:
     before = float(path[t - 1])
-    return float(path[t:].min()) / before - 1.0 if before > 0 else float("nan")
+    return float(np.min(path[t:])) / before - 1.0 if before > 0 else float("nan")
 
 
 def contagion_metrics(

@@ -2,7 +2,7 @@
 
 An agent-based limit order book simulator of how a fund concentrated in illiquid stocks can turn a redemption run into a cross-asset fire sale. Inspired by the 2026 Turkish investment fund crisis. The model is stylized and does not represent any real fund or person.
 
-**Status:** work in progress. M1 to M4 are done: matching engine, baseline market, fund build-up and unwind, multi-asset contagion with BIST-style rules.
+**Status:** work in progress. M1 to M5 are done: matching engine, baseline market, fund build-up and unwind, multi-asset contagion with BIST-style rules, Q1 phase diagram, Q3 VaR backtest.
 
 ## Questions
 
@@ -22,6 +22,7 @@ python experiments/m2_baseline.py     # baseline market, saves results/m2_baseli
 python experiments/m3_fund_unwind.py  # fund build-up and unwind, saves results/m3_fund_unwind.png
 python experiments/m4_contagion.py    # contagion to the index, saves results/m4_contagion.png
 python experiments/q1_phase_diagram.py  # Q1 heatmap, 108 runs on all CPU cores (~3 min)
+python experiments/q3_var_backtest.py   # Q3 VaR backtest, 20 runs (~1 min on 8 cores)
 python -m pytest -m "not slow"        # quick test run (skips the ~30 s scenario test)
 ```
 
@@ -32,7 +33,7 @@ src/contagionsim/orderbook/   limit order book, price-time priority matching
 src/contagionsim/market/      Market, Exchange (multi-asset, BIST-style rules), Simulation loops
 src/contagionsim/agents/      NoiseTrader, MarketMaker, ValueTrader, Fund, PortfolioFund
 src/contagionsim/scenarios.py mini BIST setup shared by experiments and tests
-src/contagionsim/analysis/    stylized facts, contagion metrics
+src/contagionsim/analysis/    stylized facts, contagion metrics, VaR models and backtests
 src/contagionsim/sweep.py     parallel parameter sweeps (one process per CPU core)
 experiments/                  one script per figure
 tests/                        pytest suite
@@ -126,3 +127,25 @@ Seed 0: the fund sold 17,000 CORNER shares and 124,679 liquid shares. Here the r
 - **Concentration amplifies the damage.** At 60% redemption, the liquid stocks fall 7.9% at 5% concentration but about 12.7% at 20% to 30%.
 - **Diversion grows with concentration.** The gap between CORNER's portfolio weight and its share of sales rises from under 1 percentage point at 5% concentration to about 15 at 30%. The more the fund is locked into the cornered stock, the more its selling lands on everything else.
 - **Uncertainty:** 3 seeds per cell is a small sample. The 10% concentration row at 30% redemption (0 of 3 seeds, against 2 of 3 at 5%) is within noise. Use `--seeds 10` for tighter estimates.
+
+## Q3: What do standard risk models miss?
+
+`experiments/q3_var_backtest.py` runs 10 seeds, each twice: a calm run, and the M4 shock (CORNER cap cut to 8% plus 30% redemptions). Prices are cut into bars of 50 steps (20 per day).
+
+- **Three models:** historical simulation, normal VaR with a rolling volatility, and GARCH(1,1). GARCH is fitted by maximum likelihood with variance targeting (`analysis/var.py`, written from scratch and tested against simulated GARCH data).
+- **Estimation:** days 1 to 7. Day 0 is skipped as start-up.
+- **Backtest window:** days 8 and 9, 400 bars pooled over seeds.
+- **Tests:** Kupiec (is the number of exceptions right?) and Christoffersen (are exceptions independent?), combined as conditional coverage at the 5% level.
+
+The calm runs are the control. A model that fails there is simply a bad model; a model that passes there and fails in the shock is blind to this kind of event.
+
+![Q3 VaR backtest](results/q3_var_backtest.png)
+
+**Findings (10 seeds).**
+- **Calm control:** all three models pass on the index and the liquid stocks at both 99% and 95%.
+- **Shock:** every model is rejected on every series. The liquid stocks, which have nothing wrong with them, see 13 to 18 exceptions of their 99% VaR where 4 are expected. The single worst bar loses 10 to 13 times the 99% VaR.
+- **Counting exceptions is not enough.** At 95%, a count-only test (Kupiec) would pass 4 of the 6 shocked index and liquid models (p = 0.08 to 0.37). They are rejected only because the exceptions cluster (Christoffersen p of 0.002 or less). A fire sale concentrates the misses into a few bars, so the total over the window can look normal.
+- **GARCH cannot learn what it has not seen.** On the calm days, volatility barely clusters, so GARCH often estimates alpha close to 0 and its VaR stays flat through the crash (seed 0 in the figure).
+- **CORNER:** before the shock, at 95%, the normal and GARCH models are rejected for too few exceptions. The build-up period's volatility inflated their estimates, making them over-conservative.
+
+**Bug found while building this:** the first GARCH version started the variance recursion differently in estimation (sample variance) and in forecasting (long-run variance). On data with little clustering, the fit found degenerate parameters (alpha close to 0, beta close to 1, omega close to 0) whose long-run variance was near zero, so the VaR was 4 times too small. Variance targeting and a consistent starting point fixed it, and there is a regression test.
