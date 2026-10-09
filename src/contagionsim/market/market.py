@@ -244,8 +244,10 @@ class Market:
     def end_auction(self) -> list[Trade]:
         trades = self.book.uncross(reference=float(self.cb_reference))
         self._settle(tuple(trades))
-        if trades:
-            self.cb_reference = trades[0].price  # the auction price is the new reference
+        # The auction price is the new circuit-breaker reference. With no auction trade,
+        # use the current price: otherwise a stock sitting at the band edge would halt
+        # again on the next order, forever (a bug found in M4 calibration)
+        self.cb_reference = trades[0].price if trades else round(self.reference_price())
         self.auction_end = None
         return trades
 

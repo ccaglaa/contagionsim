@@ -30,6 +30,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["slow: long scenario runs (deselect with -m 'not slow')"]
 
 [tool.ruff]
 line-length = 100

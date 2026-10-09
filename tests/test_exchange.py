@@ -158,6 +158,21 @@ def test_auction_ends_on_time_and_resets_reference() -> None:
     assert m.accounts["s"].position == -50 and m.accounts["b"].position == 50
 
 
+def test_auction_without_trades_moves_the_reference() -> None:
+    # Regression: a market order stopped at the band leaves nothing to cross. If the
+    # reference stayed at 1000, every later sell near 920 would halt again, forever
+    m = ana_market()
+    m.submit_limit("b", Side.BUY, 10, 930)
+    m.submit_limit("b", Side.BUY, 100, 920)
+    m.submit_market("s", Side.SELL, 50)  # 10 @ 930, then stopped by the 925 bound -> halt
+    assert m.halted and m.last_price == 930
+    m.t = 34
+    assert m.maybe_end_auction() == []  # nothing crosses: the market remainder was cancelled
+    assert m.cb_reference == 930  # moved to the current price (book one-sided: last trade)
+    res = m.submit_market("s", Side.SELL, 10)
+    assert [t.price for t in res.trades] == [920] and not m.halted  # no endless halt loop
+
+
 def test_locked_at_the_floor_when_limit_is_tighter_than_breaker() -> None:
     m = ana_market()
     m.cb_reference = 900  # breaker band would be 833, below the 850 floor

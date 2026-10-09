@@ -2,7 +2,7 @@
 
 An agent-based limit order book simulator of how a fund concentrated in illiquid stocks can turn a redemption run into a cross-asset fire sale. Inspired by the 2026 Turkish investment fund crisis. The model is stylized and does not represent any real fund or person.
 
-**Status:** work in progress. M1 (matching engine), M2 (baseline market) and M3 (fund build-up and forced unwind) are done.
+**Status:** work in progress. M1 to M4 are done: matching engine, baseline market, fund build-up and unwind, multi-asset contagion with BIST-style rules.
 
 ## Questions
 
@@ -20,6 +20,8 @@ pip install -e ".[dev]"
 python -m pytest
 python experiments/m2_baseline.py     # baseline market, saves results/m2_baseline.png
 python experiments/m3_fund_unwind.py  # fund build-up and unwind, saves results/m3_fund_unwind.png
+python experiments/m4_contagion.py    # contagion to the index, saves results/m4_contagion.png
+python -m pytest -m "not slow"        # quick test run (skips the ~30 s scenario test)
 ```
 
 ## Layout
@@ -27,7 +29,8 @@ python experiments/m3_fund_unwind.py  # fund build-up and unwind, saves results/
 ```
 src/contagionsim/orderbook/   limit order book, price-time priority matching
 src/contagionsim/market/      Market, Exchange (multi-asset, BIST-style rules), Simulation loops
-src/contagionsim/agents/      NoiseTrader, MarketMaker, ValueTrader, Fund
+src/contagionsim/agents/      NoiseTrader, MarketMaker, ValueTrader, Fund, PortfolioFund
+src/contagionsim/scenarios.py mini BIST setup shared by experiments and tests
 src/contagionsim/analysis/    stylized facts of returns
 experiments/                  one script per figure
 tests/                        pytest suite
@@ -62,7 +65,7 @@ tests/                        pytest suite
 - **Result (seed 0):** the build-up pushes the price 29% above value. The forced sale of 17,000 shares crashes it to 23% *below* value, a fire-sale discount: value buyers hit their full 25,000-share capacity and cannot absorb more. Remaining investors lose 13% of NAV. Without the shock, the price stays inflated.
 - **Known gaps:** without price limits the crash happens within a single step. Spreads barely widen, because value traders refill the book. Both are addressed in M4 (price limits, circuit breaker, multi-asset contagion).
 
-## Exchange rules (M4, part 1)
+## Exchange rules (M4)
 
 Modeled on Borsa Istanbul. Every value is a parameter in `market/rules.py`.
 
@@ -80,3 +83,28 @@ Modeled on Borsa Istanbul. Every value is a parameter in `market/rules.py`.
 - **Simplifications:** market orders are refused during auctions. The 20-minute index halt also accepts orders, so it is one long collection period. There is no end-of-session rule.
 
 Sources: [Borsa Istanbul tick-size announcement (6/11/2023), via Phillip Capital](https://phillipcapital.com.tr/Files/OfficialAnnouncement/225f6ec0-7684-44eb-ae43-35cb8926eff1.pdf); [Is Yatirim, trading rules notice (price limits and circuit breakers by segment)](https://www.isyatirim.com.tr/tr-tr/Resmi-Duyurular/Documents/İşlem%20Kuralları%20Bildirim%20Formu.pdf); [Midas, circuit breakers on Borsa Istanbul (updated 29/09/2026)](https://www.getmidas.com/destek/borsa-istanbul/bist-piyasa-bilgileri/borsa-istanbulda-devre-kesici-nedir); [Forbes Turkiye, index circuit breaker triggered twice (19/03/2025)](https://www.forbes.com.tr/ekonomi/borsada-islemler-devre-kesicinin-calismasiyla-ikinci-kez-gecici-olarak-durduruldu).
+
+## Contagion (M4)
+
+**Setup (`scenarios.mini_bist`).**
+- **CORNER** is a small cap on Ana Pazar. Four liquid large caps (**L1 to L4**) are on Yildiz Pazar, and they form a cap-weighted index with the 5% / 7% circuit breaker.
+- The liquid stocks are 5 times deeper: bigger orders, a bigger market maker, and more arbitrage capital, with shorting allowed.
+- The **PortfolioFund** puts up to 25% of CORNER's free float into CORNER and spreads the rest equally across the liquid stocks. It soft-closes at 2.5M TRY.
+
+**Selling rule: sell what can be sold.** The cash needed is split across holdings by value, but only over stocks that can trade right now. A stock that is halted or locked at limit-down is skipped, so the burden moves onto the liquid stocks. That is the contagion channel: the liquid stocks fall because of who owns them, not because anything is wrong with them.
+
+**Result (shock on day 8: CORNER cap cut to 8% of float, 30% of units redeemed).**
+
+| | Calm run | Shocked run |
+|---|---|---|
+| CORNER low after the shock | -3% to -7% | -27% to -31% |
+| Liquid stocks, average low | -1.2% to -1.8% | -6.1% to -7.4% |
+| Index circuit breaker, 5% stage | 0 of 4 seeds | 4 of 4 seeds |
+| Index circuit breaker, 7% stage | 0 of 4 seeds | 3 of 4 seeds |
+
+Seed 0: the fund sold 17,000 CORNER shares but 124,679 liquid shares. Remaining investors lost 10% of NAV. The liquid stocks recover within about 2 days as value traders buy back. CORNER does not recover.
+
+**Calibration notes (each fix was found by a test or a figure).**
+- **Inflows:** 10 flow events a day compounded without limit and created a bubble in the liquid stocks even in the calm run. Fix: a soft close (`max_aum`).
+- **Fund size:** too small, and the shock was absorbed by cash; too large, and the fund pumped the large caps. The chosen size sits between the two.
+- **Circuit-breaker bug:** after an auction with no trade, the reference price did not move, so a stock at the band edge halted every 14 steps forever. Fixed, with a regression test.
