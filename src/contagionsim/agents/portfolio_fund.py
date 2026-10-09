@@ -91,10 +91,7 @@ class PortfolioFund:
     def symbols(self) -> tuple[str, ...]:
         return (self.params.concentrated, *self.params.liquid)
 
-    # ------------------------------------------------------------------
     # Valuation
-    # ------------------------------------------------------------------
-
     def holdings_value(self, ex: Exchange) -> dict[str, float]:
         return {s: ex.position(self.name, s) * ex[s].reference_price() for s in self.symbols}
 
@@ -104,10 +101,7 @@ class PortfolioFund:
     def nav_per_unit(self, ex: Exchange) -> float:
         return self.nav(ex) / self.units if self.units > 0 else float("nan")
 
-    # ------------------------------------------------------------------
     # Main step
-    # ------------------------------------------------------------------
-
     def act(self, t: int, ex: Exchange, rng: np.random.Generator) -> None:
         if not self._initialized:
             self._initialize(ex)
@@ -144,10 +138,7 @@ class PortfolioFund:
             )
         )
 
-    # ------------------------------------------------------------------
     # Investors (same model as Fund)
-    # ------------------------------------------------------------------
-
     def _initialize(self, ex: Exchange) -> None:
         ex.transfer_external(self.name, self.params.initial_cash)
         self.units = self.params.initial_cash / 100.0  # NAV per unit starts at 1 TRY
@@ -177,10 +168,7 @@ class PortfolioFund:
         self.pending += units * self.nav_per_unit(ex)
         self.units -= units
 
-    # ------------------------------------------------------------------
     # Raising cash: sell what can be sold
-    # ------------------------------------------------------------------
-
     def sellable(self, ex: Exchange) -> list[str]:
         """Symbols the fund holds that can trade now: not halted, not locked limit-down"""
         out = []
@@ -232,10 +220,7 @@ class PortfolioFund:
         if filled:
             sold[symbol] = sold.get(symbol, 0) + filled
 
-    # ------------------------------------------------------------------
     # Investing
-    # ------------------------------------------------------------------
-
     def _invest(self, ex: Exchange) -> None:
         p = self.params
         nav = self.nav(ex)

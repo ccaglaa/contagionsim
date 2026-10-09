@@ -3,8 +3,8 @@
 State: cash and shares (its Market account), units held by investors,
 and pending redemptions (cash owed to investors but not yet paid)
 
-    NAV           = cash - pending + shares * mark price
-    NAV per unit  = NAV / units
+    NAV = cash - pending + shares * mark price
+    NAV per unit = NAV / units
 
 Each step, in this order:
     1. cancel last step's unfilled buy order
@@ -35,10 +35,7 @@ import numpy as np
 from contagionsim.market.market import Market
 from contagionsim.orderbook import Side
 
-# ---------------------------------------------------------------------------
 # Liquidation strategies
-# ---------------------------------------------------------------------------
-
 
 class LiquidationStrategy(Protocol):
     def shares_to_sell(self, needed: int, market: Market) -> int:
@@ -53,10 +50,7 @@ class NaiveLiquidation:
         return needed
 
 
-# ---------------------------------------------------------------------------
 # Fund
-# ---------------------------------------------------------------------------
-
 
 @dataclass(frozen=True, slots=True)
 class FundParams:
@@ -116,10 +110,7 @@ class Fund:
         self._nav_history: list[float] = []  # NAV per unit at each flow event
         self._initialized = False
 
-    # ------------------------------------------------------------------
     # Valuation
-    # ------------------------------------------------------------------
-
     def nav(self, market: Market) -> float:
         acc = market.accounts[self.name]
         return acc.cash - self.pending + acc.position * market.reference_price()
@@ -127,10 +118,7 @@ class Fund:
     def nav_per_unit(self, market: Market) -> float:
         return self.nav(market) / self.units if self.units > 0 else float("nan")
 
-    # ------------------------------------------------------------------
     # Main step
-    # ------------------------------------------------------------------
-
     def act(self, t: int, market: Market, rng: np.random.Generator) -> None:
         if not self._initialized:
             self._initialize(market)
@@ -166,10 +154,7 @@ class Fund:
             )
         )
 
-    # ------------------------------------------------------------------
     # Investors
-    # ------------------------------------------------------------------
-
     def _initialize(self, market: Market) -> None:
         # Launch: investors put in initial_cash at NAV per unit = 1.0 TRY (100 ticks)
         market.transfer_external(self.name, self.params.initial_cash)
@@ -201,10 +186,7 @@ class Fund:
         self.pending += units * self.nav_per_unit(market)
         self.units -= units
 
-    # ------------------------------------------------------------------
     # Forced selling
-    # ------------------------------------------------------------------
-
     def _pay_redemptions(self, market: Market) -> int:
         sold = 0
         self._pay_from_cash(market)
@@ -238,10 +220,7 @@ class Fund:
             return 0
         return market.submit_market(self.name, Side.SELL, qty).filled
 
-    # ------------------------------------------------------------------
     # Investing
-    # ------------------------------------------------------------------
-
     def _invest(self, market: Market) -> None:
         p = self.params
         acc = market.accounts[self.name]

@@ -10,10 +10,7 @@ from contagionsim.analysis import autocorr, excess_kurtosis
 from contagionsim.market import Market
 from contagionsim.orderbook import Side
 
-# ---------------------------------------------------------------------------
 # Market maker pricing rule (pure function, no market needed)
-# ---------------------------------------------------------------------------
-
 
 def test_flat_inventory_quotes_symmetric_around_reference() -> None:
     mm = MarketMaker("mm", MarketMakerParams(base_half_spread=2.0, vol_mult=0.0))
@@ -46,10 +43,7 @@ def test_inventory_limit_stops_one_side(inventory: int, missing: str) -> None:
     assert (ask is None) == (missing == "ask")
 
 
-# ---------------------------------------------------------------------------
 # Market maker in a market
-# ---------------------------------------------------------------------------
-
 
 def test_market_maker_quotes_are_post_only() -> None:
     # A resting ask at 1001 would be crossed by a naive bid at 1004
@@ -75,10 +69,7 @@ def test_market_maker_replaces_its_quotes_each_step() -> None:
         assert len(m.book) == 2  # exactly one bid and one ask, old ones cancelled
 
 
-# ---------------------------------------------------------------------------
 # Noise trader
-# ---------------------------------------------------------------------------
-
 
 def test_noise_sizes_are_heavy_tailed_and_bounded() -> None:
     nt = NoiseTrader("n", NoiseTraderParams(min_size=10, size_alpha=1.6, max_size=5000))
@@ -103,10 +94,7 @@ def test_noise_trader_forgets_filled_and_cancelled_orders() -> None:
         assert order is not None and order.owner == "n"
 
 
-# ---------------------------------------------------------------------------
 # Stylized facts helpers
-# ---------------------------------------------------------------------------
-
 
 def test_excess_kurtosis_of_normal_is_near_zero() -> None:
     x = np.random.default_rng(0).standard_normal(200_000)

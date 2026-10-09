@@ -12,10 +12,7 @@ from contagionsim.scenarios import MiniBistConfig, mini_bist
 
 LIQ = ("L1", "L2", "L3", "L4")
 
-# ---------------------------------------------------------------------------
 # Small hand-built exchange for unit tests
-# ---------------------------------------------------------------------------
-
 
 def small_exchange() -> Exchange:
     listings = [Listing("CORNER", 1000, 200_000, ANA)]
@@ -69,10 +66,7 @@ def test_soft_close_blocks_subscriptions() -> None:
     assert all(r.flow <= 0 for r in fund.records)
 
 
-# ---------------------------------------------------------------------------
 # Scenario level
-# ---------------------------------------------------------------------------
-
 
 def test_fund_invests_in_both_and_respects_its_limit() -> None:
     sim, fund = mini_bist(seed=1)

@@ -37,10 +37,7 @@ def get_fund(sim: Simulation) -> Fund:
     return fund
 
 
-# ---------------------------------------------------------------------------
 # Accounting
-# ---------------------------------------------------------------------------
-
 
 def test_cash_is_conserved_including_external_flows() -> None:
     sim = fund_sim(seed=0, shocks=[FundShock(SHOCK_T, redeem_fraction=0.3)])
@@ -65,10 +62,7 @@ def test_nav_per_unit_starts_at_one_try() -> None:
     assert get_fund(sim).records[0].nav_per_unit == pytest.approx(100.0, rel=0.01)
 
 
-# ---------------------------------------------------------------------------
 # Limits and forced selling
-# ---------------------------------------------------------------------------
-
 
 def test_fund_never_exceeds_its_concentration_limit() -> None:
     sim = fund_sim(seed=2, max_float_share=0.05)  # 5,000 shares
@@ -124,10 +118,7 @@ def test_naive_liquidation_sells_everything_now() -> None:
     assert NaiveLiquidation().shares_to_sell(1234, Market(1000)) == 1234
 
 
-# ---------------------------------------------------------------------------
 # Scenario: the shock makes the crash
-# ---------------------------------------------------------------------------
-
 
 def test_shock_creates_a_fire_sale_discount() -> None:
     shocks = [FundShock(SHOCK_T, cap_fraction=0.08), FundShock(SHOCK_T, redeem_fraction=0.3)]
@@ -139,10 +130,7 @@ def test_shock_creates_a_fire_sale_discount() -> None:
     assert low_shocked < low_calm * 0.95
 
 
-# ---------------------------------------------------------------------------
 # Value trader
-# ---------------------------------------------------------------------------
-
 
 def value_market(ref: int) -> tuple[Market, ValueTrader]:
     m = Market(ref)

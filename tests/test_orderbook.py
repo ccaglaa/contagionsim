@@ -32,10 +32,7 @@ def lesson_book() -> tuple[LimitOrderBook, dict[str, int]]:
     return book, ids
 
 
-# ---------------------------------------------------------------------------
 # Empty book and market data
-# ---------------------------------------------------------------------------
-
 
 def test_empty_book_has_no_quotes() -> None:
     book = LimitOrderBook()
@@ -66,9 +63,7 @@ def test_one_sided_book_imbalance_is_plus_or_minus_one() -> None:
     assert book.spread() is None
 
 
-# ---------------------------------------------------------------------------
 # Matching: the worked examples from the lesson
-# ---------------------------------------------------------------------------
 
 
 def test_market_buy_walks_the_book(lesson_book) -> None:
@@ -149,10 +144,7 @@ def test_trade_records_owners_and_aggressor(lesson_book) -> None:
     assert book.trades[-1] is t
 
 
-# ---------------------------------------------------------------------------
 # Edge cases
-# ---------------------------------------------------------------------------
-
 
 def test_market_order_on_empty_side_is_cancelled() -> None:
     book = LimitOrderBook()
@@ -191,10 +183,7 @@ def test_bad_input_does_not_consume_an_id() -> None:
     assert book.submit_limit("x", Side.BUY, 1, 100).order_id == 1
 
 
-# ---------------------------------------------------------------------------
 # Cancel
-# ---------------------------------------------------------------------------
-
 
 def test_cancel_removes_order_and_empty_level(lesson_book) -> None:
     book, ids = lesson_book
@@ -229,10 +218,7 @@ def test_cancel_partially_filled_order(lesson_book) -> None:
     book.check_invariants()
 
 
-# ---------------------------------------------------------------------------
 # Randomized stress test: thousands of random operations, invariants every step
-# ---------------------------------------------------------------------------
-
 
 @pytest.mark.parametrize("seed", range(5))
 def test_random_operations_preserve_invariants(seed: int) -> None:

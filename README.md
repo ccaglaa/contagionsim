@@ -21,6 +21,7 @@ python -m pytest
 python experiments/m2_baseline.py     # baseline market, saves results/m2_baseline.png
 python experiments/m3_fund_unwind.py  # fund build-up and unwind, saves results/m3_fund_unwind.png
 python experiments/m4_contagion.py    # contagion to the index, saves results/m4_contagion.png
+python experiments/q1_phase_diagram.py  # Q1 heatmap, 108 runs on all CPU cores (~3 min)
 python -m pytest -m "not slow"        # quick test run (skips the ~30 s scenario test)
 ```
 
@@ -31,7 +32,8 @@ src/contagionsim/orderbook/   limit order book, price-time priority matching
 src/contagionsim/market/      Market, Exchange (multi-asset, BIST-style rules), Simulation loops
 src/contagionsim/agents/      NoiseTrader, MarketMaker, ValueTrader, Fund, PortfolioFund
 src/contagionsim/scenarios.py mini BIST setup shared by experiments and tests
-src/contagionsim/analysis/    stylized facts of returns
+src/contagionsim/analysis/    stylized facts, contagion metrics
+src/contagionsim/sweep.py     parallel parameter sweeps (one process per CPU core)
 experiments/                  one script per figure
 tests/                        pytest suite
 ```
@@ -91,7 +93,11 @@ Sources: [Borsa Istanbul tick-size announcement (6/11/2023), via Phillip Capital
 - The liquid stocks are 5 times deeper: bigger orders, a bigger market maker, and more arbitrage capital, with shorting allowed.
 - The **PortfolioFund** puts up to 25% of CORNER's free float into CORNER and spreads the rest equally across the liquid stocks. It soft-closes at 2.5M TRY.
 
-**Selling rule: sell what can be sold.** The cash needed is split across holdings by value, but only over stocks that can trade right now. A stock that is halted or locked at limit-down is skipped, so the burden moves onto the liquid stocks. That is the contagion channel: the liquid stocks fall because of who owns them, not because anything is wrong with them.
+**Selling rule: sell what can be sold.** The cash needed is split across holdings by value, but only over stocks that can trade right now. A stock that is halted or locked at limit-down is skipped.
+
+**Two contagion channels, measured separately (`analysis/contagion.py`).**
+1. **Common ownership (the main one).** The fund holds the liquid stocks, so it sells them to pay redeemers. The liquid stocks fall because of who owns them, not because anything is wrong with them.
+2. **Diversion.** Halts and limit-down on the cornered stock push even more of the selling onto the liquid stocks. In a 30% redemption-only run (seed 0), CORNER is 16% of the fund's holdings but only 6% of what it sold. The other 10 percentage points land on the liquid stocks.
 
 **Result (shock on day 8: CORNER cap cut to 8% of float, 30% of units redeemed).**
 
@@ -102,9 +108,21 @@ Sources: [Borsa Istanbul tick-size announcement (6/11/2023), via Phillip Capital
 | Index circuit breaker, 5% stage | 0 of 4 seeds | 4 of 4 seeds |
 | Index circuit breaker, 7% stage | 0 of 4 seeds | 3 of 4 seeds |
 
-Seed 0: the fund sold 17,000 CORNER shares but 124,679 liquid shares. Remaining investors lost 10% of NAV. The liquid stocks recover within about 2 days as value traders buy back. CORNER does not recover.
+Seed 0: the fund sold 17,000 CORNER shares and 124,679 liquid shares. Here the regulatory cap forces CORNER sales, so CORNER's share of sales (16%) matches its weight. Diversion appears in the redemption-only runs (see Q1). Remaining investors lost 10% of NAV. The liquid stocks recover within about 2 days as value traders buy back. CORNER does not recover.
 
 **Calibration notes (each fix was found by a test or a figure).**
 - **Inflows:** 10 flow events a day compounded without limit and created a bubble in the liquid stocks even in the calm run. Fix: a soft close (`max_aum`).
 - **Fund size:** too small, and the shock was absorbed by cash; too large, and the fund pumped the large caps. The chosen size sits between the two.
 - **Circuit-breaker bug:** after an auction with no trade, the reference price did not move, so a stock at the band edge halted every 14 steps forever. Fixed, with a regression test.
+
+## Q1: When does it break?
+
+`experiments/q1_phase_diagram.py` runs a grid of fund concentration in CORNER (5% to 30% of free float) against a one-off redemption on day 8 (0% to 60% of units, with no regulatory cap). Each cell uses 3 seeds, and every cell uses the same seeds ("common random numbers"), so cells differ only in the two parameters.
+
+![Q1 phase diagram](results/q1_phase_diagram.png)
+
+**Findings (3 seeds per cell).**
+- **There is a tipping point near 30% redemption.** At 10% redemption or less, the liquid stocks move no more than in the no-shock column (about 1.5%) and the index breaker never fires. At 30% redemption the 5% index breaker fires in every seed once concentration is at least 15%. At 45% and above it always fires.
+- **Concentration amplifies the damage.** At 60% redemption, the liquid stocks fall 7.9% at 5% concentration but about 12.7% at 20% to 30%.
+- **Diversion grows with concentration.** The gap between CORNER's portfolio weight and its share of sales rises from under 1 percentage point at 5% concentration to about 15 at 30%. The more the fund is locked into the cornered stock, the more its selling lands on everything else.
+- **Uncertainty:** 3 seeds per cell is a small sample. The 10% concentration row at 30% redemption (0 of 3 seeds, against 2 of 3 at 5%) is within noise. Use `--seeds 10` for tighter estimates.
