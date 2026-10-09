@@ -33,6 +33,7 @@ class ContagionMetrics:
     sale_loss_vs_value: float
     concentrated_weight: float  # concentrated stock's share of the fund's stock holdings (value)
     concentrated_share_of_sales: float  # its share of the value sold after the shock
+    owed_after_1_day: float  # redemptions still unpaid one day after the shock, % of NAV
     fund_failed: bool
     concentrated_held: int  # shares of the concentrated stock just before the shock
 
@@ -81,6 +82,8 @@ def contagion_metrics(
     fair.update(fair_values or {})
     fair_value_sold = sum(r.sold.get(s, 0) * fair[s] for r in fund.records[t_shock:] for s in fair)
     nav_before = fund.records[t_shock - 1].nav_per_unit * fund.units_history[t_shock - 1]
+    one_day = min(t_shock + 1000, len(fund.records) - 1)
+    owed = fund.records[one_day].pending + fund.records[one_day].gated
 
     return ContagionMetrics(
         concentrated_drawdown=_drawdown(corner, t_shock),
@@ -94,6 +97,7 @@ def contagion_metrics(
         sale_loss_vs_value=(fair_value_sold - received) / nav_before if nav_before else 0.0,
         concentrated_weight=held_value[c] / total_held if total_held else 0.0,
         concentrated_share_of_sales=sold_value[c] / total_sold if total_sold else 0.0,
+        owed_after_1_day=owed / nav_before if nav_before else 0.0,
         fund_failed=fund.failed_at is not None,
         concentrated_held=fund.records[t_shock - 1].positions[c],
     )

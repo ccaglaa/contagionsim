@@ -89,6 +89,7 @@ class MiniBistConfig:
     n_noise_liquid: int = 16
     n_value: int = 5
     schedule: Schedule | None = None  # fund liquidation schedule (None = Immediate)
+    cap_schedule: Schedule | None = None  # regulatory phase-in of a cap (None = schedule)
     fund: PortfolioFundParams = field(
         default_factory=lambda: PortfolioFundParams(
             initial_cash=30_000_000,  # 300k TRY at launch
@@ -139,7 +140,7 @@ def mini_bist(
     fund_params = cfg.fund
     if fund_params.concentrated != cfg.concentrated or fund_params.liquid != cfg.liquid:
         raise ValueError("fund symbols must match the listings")
-    fund = PortfolioFund("fund", fund_params, shocks, cfg.schedule)
+    fund = PortfolioFund("fund", fund_params, shocks, cfg.schedule, cfg.cap_schedule)
     agents.append(fund)
     if news:
         # Appended last: with no news the agent list, and so every run, is unchanged

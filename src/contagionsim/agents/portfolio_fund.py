@@ -29,6 +29,13 @@ the schedule says is not due yet:
     sell now               = what is owed - allowed_outstanding(t)
 Immediate (the default) has F = 1, so nothing may wait: exactly the M4 behaviour.
 Whatever the market would not take (halt, limit-down) is caught up on later steps
+
+Policy levers (Q3, M6):
+    cap_schedule     : the regulator lets the cap excess be sold over time (phase-in);
+                       default: the fund's own schedule
+    redemption_gate  : at most this share of NAV can become payable per trading day;
+                       redemptions above it wait in a queue for the next day.
+                       Queued money is still owed: it is subtracted from NAV
 """
 
 from __future__ import annotations
@@ -63,6 +70,8 @@ class PortfolioFundParams:
     flow_sigma: float = 0.01
     max_flow: float = 0.10
     max_aum: float | None = None  # soft close: no new subscriptions above this NAV (ticks)
+    redemption_gate: float | None = None  # max share of NAV payable per day (None = no gate)
+    steps_per_day: int = 1000
 
 
 @dataclass
@@ -75,6 +84,7 @@ class PortfolioRecord:
     positions: dict[str, int]
     sold: dict[str, int] = field(default_factory=dict)  # shares sold this step
     proceeds: dict[str, int] = field(default_factory=dict)  # cash received for them (ticks)
+    gated: float = 0.0  # redemptions queued behind the gate (ticks)
 
 
 class PortfolioFund:
@@ -84,10 +94,15 @@ class PortfolioFund:
         params: PortfolioFundParams | None = None,
         shocks: list[FundShock] | None = None,
         schedule: Schedule | None = None,
+        cap_schedule: Schedule | None = None,
     ) -> None:
         self.name = name
         self.params = params or PortfolioFundParams()
         self.schedule: Schedule = schedule or Immediate()
+        self.cap_schedule: Schedule = cap_schedule or self.schedule
+        self.gated = 0.0  # redemptions waiting behind the gate (ticks), still owed
+        self._gate_day = -1
+        self._released_today = 0.0
         # Programmes: (start step, amount). Cash in ticks for redemptions, shares for the cap
         self._cash_programmes: list[tuple[int, float]] = []
         self._cap_programme: tuple[int, int] | None = None
@@ -117,7 +132,8 @@ class PortfolioFund:
         return {s: ex.position(self.name, s) * ex[s].reference_price() for s in self.symbols}
 
     def nav(self, ex: Exchange) -> float:
-        return ex.cash(self.name) - self.pending + sum(self.holdings_value(ex).values())
+        owed = self.pending + self.gated
+        return ex.cash(self.name) - owed + sum(self.holdings_value(ex).values())
 
     def nav_per_unit(self, ex: Exchange) -> float:
         return self.nav(ex) / self.units if self.units > 0 else float("nan")
@@ -148,11 +164,12 @@ class PortfolioFund:
             if shock.cap_fraction is not None:
                 self.cap_shares = int(shock.cap_fraction * p.concentrated_free_float)
 
+        self._release_gated(ex)
         sold: dict[str, int] = {}
         proceeds: dict[str, int] = {}
         self._raise_cash(ex, sold, proceeds)
         self._comply_with_cap(ex, sold, proceeds)
-        if self.pending == 0 and not self._above_cap(ex):
+        if self.pending == 0 and self.gated == 0 and not self._above_cap(ex):
             self._invest(ex)
 
         positions = {s: ex.position(self.name, s) for s in self.symbols}
@@ -169,6 +186,7 @@ class PortfolioFund:
                 positions,
                 sold,
                 proceeds,
+                self.gated,
             )
         )
 
@@ -203,10 +221,34 @@ class PortfolioFund:
     def _redeem_units(self, units: float, ex: Exchange) -> None:
         units = min(units, self.units)
         amount = units * self.nav_per_unit(ex)
-        self.pending += amount
         self.units -= units
-        if amount > 0:
-            self._cash_programmes.append((self.t, amount))
+        if amount <= 0:
+            return
+        if self.params.redemption_gate is None:
+            self._make_payable(amount)
+        else:
+            self.gated += amount
+            self._release_gated(ex)
+
+    def _make_payable(self, amount: float) -> None:
+        self.pending += amount
+        self._cash_programmes.append((self.t, amount))
+
+    def _release_gated(self, ex: Exchange) -> None:
+        """Move queued redemptions to payable, up to the gate's daily allowance"""
+        gate = self.params.redemption_gate
+        if gate is None or self.gated <= 0:
+            return
+        day = self.t // self.params.steps_per_day
+        if day != self._gate_day:
+            self._gate_day = day
+            self._released_today = 0.0
+        allowance = gate * max(self.nav(ex) + self.gated, 0.0) - self._released_today
+        release = min(self.gated, max(allowance, 0.0))
+        if release > 0:
+            self.gated -= release
+            self._released_today += release
+            self._make_payable(release)
 
     # ------------------------------------------------------------------
     # Raising cash: sell what can be sold
@@ -276,7 +318,7 @@ class PortfolioFund:
         if self._cap_programme is None:
             self._cap_programme = (self.t, excess)
         start, total = self._cap_programme
-        allowed = math.floor(total * (1.0 - self.schedule.fraction_done(self.t - start)))
+        allowed = math.floor(total * (1.0 - self.cap_schedule.fraction_done(self.t - start)))
         self._sell(ex, s, excess - allowed, sold, proceeds)
 
     def _sell(
