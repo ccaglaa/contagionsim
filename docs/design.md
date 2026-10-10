@@ -1,6 +1,6 @@
 # Design notes
 
-How the simulator is built, in the order it was built. Each section ends with what the model at that stage could not do, which motivated the next one. The results are in the [README](../README.md).
+How the simulator is built, in the order it was built. Each section ends with what the model at that stage could not do, which motivated the next one. The results are in the [README](../README.md) and in [results.md](results.md).
 
 - [Order book](#order-book)
 - [Baseline market](#baseline-market-noise-traders-and-a-market-maker)
@@ -25,7 +25,7 @@ How the simulator is built, in the order it was built. Each section ends with wh
 - **Noise traders** send Pareto-sized orders (many small, a few huge, like real order flow). This is what produces fat-tailed returns.
 - **Market maker** quotes around a reservation price `mid - skew * inventory` with a half-spread that widens with EWMA volatility (a simplified Avellaneda-Stoikov rule), stops quoting the side that would breach its inventory limit, and never crosses the book (post-only).
 - **Baseline result (seed 0, 20k steps):** the book is two-sided 99.9% of the time, the mean spread is 2.5 ticks, and 20-step returns have excess kurtosis of about 33 (fat tails). The market maker takes part in about 11% of the volume, stays profitable, and keeps its inventory within a few hundred shares.
-- **Known gap:** volatility clustering is weak (acf of |r| about 0.04), because noise traders act independently of the past. Feedback agents (fund flows, momentum retail investors) come in M3.
+- **Known gap:** volatility clustering is weak (acf of |r| about 0.04), because noise traders act independently of the past. Feedback comes next, from the fund's performance-chasing investors.
 
 ## Single-stock fund and value traders
 
@@ -35,7 +35,7 @@ How the simulator is built, in the order it was built. Each section ends with wh
 - **Value traders** buy below and sell above a fundamental value, with limited capacity. Short selling is much more limited than buying (500 vs 5,000 shares each), as on BIST. This is why the price can be pushed far above value.
 - **Shock:** a regulator caps holdings at 8% of free float, and 30% of units are redeemed. The fund sells naively, all at once with market orders.
 - **Result (seed 0):** the build-up pushes the price 29% above value. The forced sale of 17,000 shares crashes it to 23% *below* value, a fire-sale discount: value buyers hit their full 25,000-share capacity and cannot absorb more. Remaining investors lose 13% of NAV. Without the shock, the price stays inflated.
-- **Known gaps:** without price limits the crash happens within a single step. Spreads barely widen, because value traders refill the book. Both are addressed in M4 (price limits, circuit breaker, multi-asset contagion).
+- **Known gaps:** without price limits the crash happens within a single step. Spreads barely widen, because value traders refill the book. The exchange rules and the multi-asset setup below address both.
 
 ## Exchange rules
 
