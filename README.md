@@ -1,123 +1,61 @@
 # ContagionSim
 
-An agent-based limit order book simulator of how a fund concentrated in illiquid stocks can turn a redemption run into a cross-asset fire sale. Inspired by the 2026 Turkish investment fund crisis. The model is stylized and does not represent any real fund or person.
+An agent-based market simulator that shows how a fund concentrated in an illiquid stock can turn a redemption run into a fire sale across the whole market. It asks four questions: when the market breaks, how a forced seller should sell, what standard risk models and rules miss, and whether the crash can be seen coming.
 
-**Status:** work in progress. Done: matching engine, baseline market, fund build-up and unwind, multi-asset contagion with BIST-style rules, Q1 phase diagram, Q2 liquidation schedules, Q3 VaR backtest and policy experiment. Next: Q4 early warning.
+The setting is inspired by the 2026 Turkish investment fund crisis. In August 2026 the Capital Markets Board (SPK) tightened concentration limits for funds holding stocks with a low free float, and on 17 September 2026 it ordered 131 investment funds to be liquidated (SPK Bulletin 2026/61). The model is stylized: it does not represent any real fund, firm or person, and its results hold under its stated assumptions.
 
-## Questions
+## Results at a glance
 
-1. **When does it break?** At what concentration and redemption shock does an orderly market tip into limit-down and circuit breakers?
-2. **How should a forced seller liquidate?** Naive dumping vs pro-rata vs an optimal-execution schedule (Almgren-Chriss).
-3. **What do risk models and rules miss?** A GARCH / historical VaR backtest through the crash, and a policy experiment on position caps, redemption gates and price-limit widths.
-4. **Can you see it coming?** An early-warning classifier for limit-down events from order book signals, evaluated with temporal splits and precision-recall.
+| Question | Answer in this model |
+|---|---|
+| **1. When does it break?** | There is a tipping point near **30% of units redeemed**. At 10% or less the liquid stocks move no more than in a calm market. From 30%, with the fund holding at least 15% of the illiquid stock's float, the 5% index circuit breaker fires in every seed. |
+| **2. How should a forced seller liquidate?** | **Dumping is the worst choice for the fund and for the market.** Selling over just half a day cuts the liquid stocks' fall from 6.9% to 1.7% (the calm level), and the index breaker no longer fires. Almgren-Chriss schedules behave as the theory predicts. |
+| **3. What do risk models and rules miss?** | Historical, normal and GARCH VaR **pass in calm runs and are all rejected in the shock**. At 95%, a test that only counts exceptions passes 4 of 6 models; only the clustering test catches them. Of the rules tested, **only a redemption gate stops the contagion** (10% of NAV per day: 6.9% → 1.4%), and its cost is that 27% of NAV is still unpaid after a day. |
+| **4. Can you see it coming?** | **Only weakly from market data.** Public-data models reach a PR-AUC of 0.068 against a base rate of 0.005, no better than a simple "the index is already down" rule. **Adding the fund's flows (what a regulator sees)** raises it to 0.133 and cuts false alarms at 80% recall from 44% to 1%. |
 
-## Quick start
+**Common thread:** everything that spreads the selling over time (a better schedule, a gate, a trading halt) reduces the contagion. The damage comes less from how much is sold than from how fast.
 
-```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-python -m pytest
-python experiments/m2_baseline.py     # baseline market, saves results/m2_baseline.png
-python experiments/m3_fund_unwind.py  # fund build-up and unwind, saves results/m3_fund_unwind.png
-python experiments/m4_contagion.py    # contagion to the index, saves results/m4_contagion.png
-python experiments/q1_phase_diagram.py  # Q1 heatmap, 108 runs on all CPU cores (~3 min)
-python experiments/q2_liquidation.py    # Q2 liquidation schedules, 60 runs (~3 min on 8 cores)
-python experiments/q3_var_backtest.py   # Q3 VaR backtest, 20 runs (~1 min on 8 cores)
-python experiments/q3_policy.py         # Q3 policy experiment, 45 runs (~2 min on 8 cores)
-python -m pytest -m "not slow"        # quick test run (skips the ~30 s scenario test)
+## The mechanism
+
+```mermaid
+flowchart LR
+    subgraph buildup["Build-up"]
+        A["Inflows chase past returns"] --> B["Fund buys the low-float stock CORNER"]
+        B --> C["CORNER's price rises"]
+        C --> D["Fund NAV rises"]
+        D --> A
+    end
+    subgraph unwind["Unwind"]
+        E["Trigger: position cap and/or redemptions"] --> F["Fund must raise cash"]
+        F --> G["Sells CORNER"]
+        G --> H["CORNER hits limit-down or is halted"]
+        H -- "diversion" --> I["Sells the liquid stocks"]
+        F -- "common ownership" --> I
+        I --> J["Liquid stocks and the index fall"]
+        J --> K["Index circuit breaker"]
+        J --> L["NAV falls: more redemptions"]
+        L --> F
+    end
+    D -. "the same holdings" .-> F
 ```
 
-## Layout
+The liquid stocks fall although nothing is wrong with them, through two channels measured separately in `analysis/contagion.py`:
+- **Common ownership (the main channel):** the fund holds them, so it sells them to pay redeemers.
+- **Diversion:** halts and limit-down on CORNER push even more of the selling onto the stocks that can still trade.
 
-```
-src/contagionsim/orderbook/   limit order book, price-time priority matching
-src/contagionsim/market/      Market, Exchange (multi-asset, BIST-style rules), Simulation loops
-src/contagionsim/agents/      NoiseTrader, MarketMaker, ValueTrader, Fund, PortfolioFund
-src/contagionsim/execution/   liquidation schedules (immediate, TWAP, Almgren-Chriss)
-src/contagionsim/scenarios.py mini BIST setup and news shocks, shared by experiments and tests
-src/contagionsim/analysis/    stylized facts, contagion metrics, VaR models and backtests
-src/contagionsim/sweep.py     parallel parameter sweeps (one process per CPU core)
-experiments/                  one script per figure
-tests/                        pytest suite
-```
+## The model in one minute
 
-## Design notes (M1)
+- **Exchange:** five stocks, each with a limit order book (price-time priority, integer ticks). Borsa Istanbul-style rules: daily price limits by segment, stock circuit breakers followed by a call auction, and a 5% / 7% index circuit breaker. One trading day is 1,000 steps.
+- **CORNER** is a small cap; **L1 to L4** are liquid large caps that form the index.
+- **Agents:**
+  - noise traders with fat-tailed order sizes;
+  - market makers that skew their quotes against their inventory and widen them with volatility;
+  - value traders with limited capital and tightly limited short selling (the limits to arbitrage);
+  - a portfolio fund whose investors chase performance and are paid at the current NAV, which gives a first-mover advantage to those who redeem first.
+- **The standard shock** (used in Q2 and Q3): on day 8 the regulator cuts the fund's CORNER cap to 8% of free float, and 30% of units are redeemed.
+- **Experiments:** every experiment has a control (no shock, or today's rules) run on the same seeds, so differences come from the treatment, not from luck.
 
-- **Prices are integer ticks.** Floats make `0.1 + 0.2 != 0.3`, which breaks price comparisons and dict keys. Conversion to currency happens at the exchange layer.
-- **Book structure:** per side, a dict `price -> deque` (FIFO time priority within a level) plus a sorted list of active prices (best price lookup). A dict `order_id -> Order` makes cancel O(1) to locate.
-- **Sequence numbers, not timestamps,** define time priority, so seeded runs are exactly reproducible.
-- **Trades execute at the resting order's price.**
-- **Market orders never rest.** The unfilled remainder is reported as cancelled.
-- **Bad input raises; cancelling an unknown order returns `False`.** A zero-quantity order is a caller bug; cancelling an order that was just filled is normal in a simulation.
-- **Invariants** (never crossed, no empty levels, index consistent, FIFO) are checked after every step of a randomized stress test.
-
-## Design notes (M2)
-
-- **Agents go through `Market`, never the book directly.** `Market` settles every trade into both accounts, so cash and shares are conserved by construction (tested).
-- **One seeded `numpy` Generator** drives all randomness, and the agent order is reshuffled every step, so no agent gets a permanent queue advantage.
-- **Noise traders** send Pareto-sized orders (many small, a few huge, like real order flow). This is what produces fat-tailed returns.
-- **Market maker** quotes around a reservation price `mid - skew * inventory` with a half-spread that widens with EWMA volatility (a simplified Avellaneda-Stoikov rule), stops quoting the side that would breach its inventory limit, and never crosses the book (post-only).
-- **Baseline result (seed 0, 20k steps):** the book is two-sided 99.9% of the time, the mean spread is 2.5 ticks, and 20-step returns have excess kurtosis of about 33 (fat tails). The market maker takes part in about 11% of the volume, stays profitable, and keeps its inventory within a few hundred shares.
-- **Known gap:** volatility clustering is weak (acf of |r| about 0.04), because noise traders act independently of the past. Feedback agents (fund flows, momentum retail investors) come in M3.
-
-## Design notes (M3)
-
-- **Fund:** NAV = cash - redemptions owed + shares x price. Investors chase performance: every 100 steps, flow = 2% + 2 x (return over the last 5 periods) + noise, capped at +/-10% of NAV.
-- **Reflexive build-up:** the fund invests inflows in its one stock, which pushes the price up. NAV rises and attracts more inflows. The fund's own limit is 25% of free float.
-- **First-mover advantage:** redeemers are paid at today's NAV, and the selling needed to pay them happens afterwards, so the price impact lands on the investors who stay (tested).
-- **Value traders** buy below and sell above a fundamental value, with limited capacity. Short selling is much more limited than buying (500 vs 5,000 shares each), as on BIST. This is why the price can be pushed far above value.
-- **Shock:** a regulator caps holdings at 8% of free float, and 30% of units are redeemed. The fund sells naively, all at once with market orders.
-- **Result (seed 0):** the build-up pushes the price 29% above value. The forced sale of 17,000 shares crashes it to 23% *below* value, a fire-sale discount: value buyers hit their full 25,000-share capacity and cannot absorb more. Remaining investors lose 13% of NAV. Without the shock, the price stays inflated.
-- **Known gaps:** without price limits the crash happens within a single step. Spreads barely widen, because value traders refill the book. Both are addressed in M4 (price limits, circuit breaker, multi-asset contagion).
-
-## Exchange rules (M4)
-
-Modeled on Borsa Istanbul. Every value is a parameter in `market/rules.py`.
-
-| Segment | Daily price limit | Stock circuit breaker | Auction after a halt |
-|---|---|---|---|
-| Yildiz Pazar | +/-20% | 10% | 5 min collect + 2 min match |
-| Ana Pazar | +/-15% | 7.5% | 15 min collect + 2 min match |
-| Alt Pazar | +/-10% | 5% | 15 min collect + 2 min match |
-
-- **Daily limit:** measured from the base price (previous close). Orders priced outside the band are rejected, and market orders stop at the band edge, so a stock can be *locked* at limit-down.
-- **Stock circuit breaker:** an order that would trade beyond the trigger, measured from the reference price, halts the stock and starts a call auction. The auction price becomes the new reference.
-- **Call auction:** orders collect without matching, then everything executes at one price. That price maximizes volume, then minimizes the leftover imbalance, then sits closest to the reference price.
-- **Index circuit breaker:** a capitalization-weighted index falling 5% or 7% below the previous close halts every stock for 20 + 5 + 5 minutes. Each stage fires once per day.
-- **Time:** one trading day is 1,000 steps, about 2 steps per minute of an 8-hour session.
-- **Simplifications:** market orders are refused during auctions. The 20-minute index halt also accepts orders, so it is one long collection period. There is no end-of-session rule.
-
-Sources: [Borsa Istanbul tick-size announcement (6/11/2023), via Phillip Capital](https://phillipcapital.com.tr/Files/OfficialAnnouncement/225f6ec0-7684-44eb-ae43-35cb8926eff1.pdf); [Is Yatirim, trading rules notice (price limits and circuit breakers by segment)](https://www.isyatirim.com.tr/tr-tr/Resmi-Duyurular/Documents/İşlem%20Kuralları%20Bildirim%20Formu.pdf); [Midas, circuit breakers on Borsa Istanbul (updated 29/09/2026)](https://www.getmidas.com/destek/borsa-istanbul/bist-piyasa-bilgileri/borsa-istanbulda-devre-kesici-nedir); [Forbes Turkiye, index circuit breaker triggered twice (19/03/2025)](https://www.forbes.com.tr/ekonomi/borsada-islemler-devre-kesicinin-calismasiyla-ikinci-kez-gecici-olarak-durduruldu).
-
-## Contagion (M4)
-
-**Setup (`scenarios.mini_bist`).**
-- **CORNER** is a small cap on Ana Pazar. Four liquid large caps (**L1 to L4**) are on Yildiz Pazar, and they form a cap-weighted index with the 5% / 7% circuit breaker.
-- The liquid stocks are 5 times deeper: bigger orders, a bigger market maker, and more arbitrage capital, with shorting allowed.
-- The **PortfolioFund** puts up to 25% of CORNER's free float into CORNER and spreads the rest equally across the liquid stocks. It soft-closes at 2.5M TRY.
-
-**Selling rule: sell what can be sold.** The cash needed is split across holdings by value, but only over stocks that can trade right now. A stock that is halted or locked at limit-down is skipped.
-
-**Two contagion channels, measured separately (`analysis/contagion.py`).**
-1. **Common ownership (the main one).** The fund holds the liquid stocks, so it sells them to pay redeemers. The liquid stocks fall because of who owns them, not because anything is wrong with them.
-2. **Diversion.** Halts and limit-down on the cornered stock push even more of the selling onto the liquid stocks. In a 30% redemption-only run (seed 0), CORNER is 16% of the fund's holdings but only 6% of what it sold. The other 10 percentage points land on the liquid stocks.
-
-**Result (shock on day 8: CORNER cap cut to 8% of float, 30% of units redeemed).**
-
-| | Calm run | Shocked run |
-|---|---|---|
-| CORNER low after the shock | -3% to -7% | -27% to -31% |
-| Liquid stocks, average low | -1.2% to -1.8% | -6.1% to -7.4% |
-| Index circuit breaker, 5% stage | 0 of 4 seeds | 4 of 4 seeds |
-| Index circuit breaker, 7% stage | 0 of 4 seeds | 3 of 4 seeds |
-
-Seed 0: the fund sold 17,000 CORNER shares and 124,679 liquid shares. Here the regulatory cap forces CORNER sales, so CORNER's share of sales (16%) matches its weight. Diversion appears in the redemption-only runs (see Q1). Remaining investors lost 10% of NAV. The liquid stocks recover within about 2 days as value traders buy back. CORNER does not recover.
-
-**Calibration notes (each fix was found by a test or a figure).**
-- **Inflows:** 10 flow events a day compounded without limit and created a bubble in the liquid stocks even in the calm run. Fix: a soft close (`max_aum`).
-- **Fund size:** too small, and the shock was absorbed by cash; too large, and the fund pumped the large caps. The chosen size sits between the two.
-- **Circuit-breaker bug:** after an auction with no trade, the reference price did not move, so a stock at the band edge halted every 14 steps forever. Fixed, with a regression test.
+The full design, the exchange rules with their sources, and the calibration notes are in [docs/design.md](docs/design.md).
 
 ## Q1: When does it break?
 
@@ -133,9 +71,9 @@ Seed 0: the fund sold 17,000 CORNER shares and 124,679 liquid shares. Here the r
 
 ## Q2: How should a forced seller liquidate?
 
-`experiments/q2_liquidation.py` runs the M4 shock (CORNER cap cut to 8% plus 30% redemptions) with the fund following one of six liquidation schedules (`execution/schedules.py`):
+`experiments/q2_liquidation.py` runs the standard shock with the fund following one of six liquidation schedules (`execution/schedules.py`):
 
-- **immediate:** sell everything at once (the M4 fund).
+- **immediate:** sell everything at once with market orders.
 - **TWAP:** equal amounts per step over half a day, 1 day or 3 days.
 - **Almgren-Chriss over 3 days:** the optimal trajectory `x(u) = X sinh(k(1-u)) / sinh(k)`, with urgency `k = kappa T` and `kappa = sqrt(lambda sigma^2 / eta)`. A low `k` gives back TWAP; a high `k` front-loads the selling toward immediate.
 
@@ -156,7 +94,7 @@ There are two scenarios: a pure fire sale, and **bad news**, where the market le
 
 ## Q3: What do standard risk models miss?
 
-`experiments/q3_var_backtest.py` runs 10 seeds, each twice: a calm run, and the M4 shock (CORNER cap cut to 8% plus 30% redemptions). Prices are cut into bars of 50 steps (20 per day).
+`experiments/q3_var_backtest.py` runs 10 seeds, each twice: a calm run, and the standard shock. Prices are cut into bars of 50 steps (20 per day).
 
 - **Three models:** historical simulation, normal VaR with a rolling volatility, and GARCH(1,1). GARCH is fitted by maximum likelihood with variance targeting (`analysis/var.py`, written from scratch and tested against simulated GARCH data).
 - **Estimation:** days 1 to 7. Day 0 is skipped as start-up.
@@ -178,7 +116,7 @@ The calm runs are the control. A model that fails there is simply a bad model; a
 
 ## Q3 (policy): Which rules limit the contagion?
 
-`experiments/q3_policy.py` gives the naive fund (it dumps immediately) the M4 shock on day 8 and changes one rule at a time. Each policy uses 5 seeds.
+`experiments/q3_policy.py` gives the naive fund (it dumps immediately) the standard shock and changes one rule at a time. Each policy uses 5 seeds.
 
 - **Cap phase-in:** the regulator lets the fund sell its CORNER excess over 1 or 3 days.
 - **Redemption gate:** at most 20% or 10% of NAV can be paid out per day, and the rest waits. Queued money is still owed, so it is subtracted from NAV.
@@ -202,3 +140,119 @@ The calm runs are the control. A model that fails there is simply a bad model; a
 - **Price limits protect only the stock they apply to.** Without a limit CORNER falls 52%; with +/-10% it falls 21%. The liquid stocks barely change.
 - **The index breaker helps:** turning it off deepens the liquid stocks' fall from 6.9% to 9.3%. The halt forces the dumping fund to pause, which is the same mechanism as spreading sales in Q2. **Caveat:** in this model, market orders are refused during auctions, so the fund cannot sell into the reopening auction. A real fund could, so the size of this effect is partly a modelling choice.
 - **Connection to Q2:** everything that spreads the selling over time (a better schedule, a gate, a halt) reduces contagion. A fund that spreads its own sales (Q2) gets the gate's benefit without making investors wait.
+
+## Q4: Can you see it coming?
+
+`experiments/q4_early_warning.py` simulates 300 random redemption runs (`prediction/runs.py`):
+- 30% of runs are calm;
+- the rest have 1 to 6 waves of 5% to 20% of units, 20 to 200 steps apart, sometimes with a cap;
+- the fund either dumps or sells over half a day.
+
+44 runs end in a 5% index breaker.
+
+Every 5 steps from day 7, the experiment computes features and the label: **will the 5% index circuit breaker fire within the next 100 steps (about 50 minutes)?** Two information sets are compared:
+
+- **Public market data** (15 features): index and stock returns, distance to yesterday's close, volatility, spreads, top-of-book imbalance, volume, halts, CORNER near limit-down. This is what any market participant sees.
+- **Plus fund flows** (4 more): the fund's net outflow today and over the last 300 steps, its sales today, and redemptions still owed. This is what a regulator or the fund platform (TEFAS) sees.
+
+**Evaluation, as for a fraud or credit model.**
+- **Split by run:** test runs are those whose seed ends in 7, 8 or 9 (90 runs, 13 breakers), never seen in training. Splitting individual steps at random would leak, because neighbouring steps of a run are nearly identical.
+- **No look-ahead:** a test checks that features at step t are identical when everything after t is deleted.
+- **Precision-recall** rather than accuracy, since only 0.5% of samples are positive.
+- **Calibration** and Brier score.
+- **Early warning:** the alarm threshold is set on the training runs at 80% recall. On the test runs, it counts breakers caught, minutes of warning and false alarms.
+- **Uncertainty:** run-level bootstrap intervals, and a paired bootstrap for differences between models.
+
+![Q4 early warning](results/q4_early_warning.png)
+
+| Predictor | PR-AUC (90% CI) | Breakers caught | Median warning | False alarms |
+|---|---|---|---|---|
+| Rule: index vs previous close | 0.069 (0.032-0.156) | 13/13 | 148 min | 44% |
+| Logistic, public data | 0.068 (0.032-0.115) | 13/13 | 148 min | 32% |
+| Gradient boosting, public data | 0.068 (0.026-0.131) | 13/13 | 79 min | 4.3% |
+| Logistic, + fund flows | 0.079 (0.033-0.142) | 13/13 | 148 min | 24% |
+| Gradient boosting, + fund flows | 0.133 (0.054-0.229) | 12/13 | 60 min | 1.0% |
+
+The base rate is 0.49%: a random predictor scores a PR-AUC of about 0.005.
+
+**Findings.**
+- **Public market data gives only a weak warning.** All public predictors score about 14 times the base rate, and machine learning does not beat the simple "the index is already down a lot" rule on ranking. Boosting does cut false alarms at the same recall, from 44% to 4%.
+- **Fund flows are what help.** Adding them to the boosting model raises PR-AUC by 0.065 (paired 90% CI +0.026 to +0.116) and cuts false alarms to 1%. The single most useful feature is the fund's outflow over the last 300 steps. **The best early warning comes from data a regulator has, not from the order book.** The trigger of a run (redemptions) is private, and the market only sees its footprint once the selling starts.
+- **Against the simple rule, the ranking gain is not statistically clear** (paired 90% CI -0.027 to +0.157). The gain shows at the operating point: false alarms of 1% against 44%.
+- **Limits.** There are only 44 breaker events in total. A first version with lighter regularization overfitted badly (it caught 1 of 8 test breakers), so the boosting model is now strongly regularized. Precision stays low at most thresholds, and calibration is only rough, since only the fund-flow model beats always predicting the base rate on Brier score. The runs are drawn from a distribution I chose, so this measures what the model can learn in this world, not real-world performance.
+- **A finding along the way:** in the first version of the run generator, runs of 3% to 12% waves, 50 to 300 steps apart, never tripped the breaker, even at 46% of units redeemed in total. Value traders restore prices between waves. A run that arrives slowly is absorbed, the same lesson as Q2 and the redemption gate.
+
+## Limitations
+
+- **Stylized, not calibrated.** Parameters were chosen to give plausible behaviour (fat tails, realistic spreads, a working book), not fitted to Borsa Istanbul data. Volatility clustering is weak in calm periods.
+- **One forced seller.** No other fund runs and no informed traders sell, so waiting is cheap. This is why the Almgren-Chriss trade-off barely appears (Q2), and why slow selling looks so harmless.
+- **Auction simplification.** Market orders are refused during call auctions, so a halt forces the fund to pause. Part of the index breaker's benefit (Q3) comes from this choice.
+- **Investors do not anticipate rules.** In reality, the prospect of a gate can make investors redeem earlier. The model does not capture this.
+- **Fund settlement.** Redeemers are paid as soon as the fund has the cash. Real fund settlement takes a few days, and its exact rules were not modelled.
+- **Agents do not learn.** All behaviour rules are fixed.
+- **Small samples.** There are 3 to 10 seeds per experiment cell and 44 breaker events in Q4. Intervals are reported where they matter.
+- **A chosen world.** The Q4 runs are drawn from a distribution I designed, so the classifier's scores measure what can be learned in this model, not real-world performance.
+
+## Reproduce
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+python -m pytest -m "not slow"          # 131 quick tests (~10 s); drop -m to run all 132
+python experiments/q1_phase_diagram.py  # Q1, 108 runs (~3 min on 8 cores)
+python experiments/q2_liquidation.py    # Q2, 60 runs (~3 min)
+python experiments/q3_var_backtest.py   # Q3 VaR, 20 runs (~1 min)
+python experiments/q3_policy.py         # Q3 policy, 45 runs (~2 min)
+python experiments/q4_early_warning.py  # Q4, 300 runs (~7 min)
+```
+
+Each script writes its figure to `results/`. `m2_baseline.py`, `m3_fund_unwind.py` and `m4_contagion.py` reproduce the intermediate stages described in [docs/design.md](docs/design.md). All runs are seeded and give identical numbers on every machine tested.
+
+## Engineering
+
+- `src/` layout, type hints throughout, `mypy --strict`, `ruff` lint and format.
+- 132 `pytest` tests, including:
+  - a randomized stress test of the order book invariants;
+  - conservation of cash and shares;
+  - GARCH estimation against simulated data;
+  - a no-look-ahead test for the Q4 features;
+  - regression tests for every bug found.
+- GitHub Actions runs lint, types and tests on Python 3.10 and 3.12.
+- Parameter sweeps run in parallel, one process per CPU core.
+- Dependencies: NumPy, SciPy and scikit-learn; matplotlib for figures.
+
+```
+src/contagionsim/orderbook/   limit order book, price-time priority matching, call auction
+src/contagionsim/market/      Market, Exchange (multi-asset, BIST-style rules), simulation loops
+src/contagionsim/agents/      NoiseTrader, MarketMaker, ValueTrader, Fund, PortfolioFund
+src/contagionsim/execution/   liquidation schedules (immediate, TWAP, Almgren-Chriss)
+src/contagionsim/scenarios.py mini BIST setup and news shocks
+src/contagionsim/analysis/    stylized facts, contagion metrics, VaR models and backtests
+src/contagionsim/sweep.py     parallel parameter sweeps
+src/contagionsim/prediction/  random redemption runs, early-warning features and labels
+experiments/                  one script per figure
+tests/                        pytest suite
+docs/design.md                design notes, exchange rules, calibration
+```
+
+## References
+
+- Almgren, R. and Chriss, N. (2000). Optimal execution of portfolio transactions. *Journal of Risk*.
+- Avellaneda, M. and Stoikov, S. (2008). High-frequency trading in a limit order book. *Quantitative Finance*.
+- Bollerslev, T. (1986). Generalized autoregressive conditional heteroskedasticity. *Journal of Econometrics*.
+- Bouchaud, J.-P., Bonart, J., Donier, J. and Gould, M. (2018). *Trades, Quotes and Prices*. Cambridge University Press.
+- Brunnermeier, M. and Pedersen, L. (2009). Market liquidity and funding liquidity. *Review of Financial Studies*.
+- Chen, Q., Goldstein, I. and Jiang, W. (2010). Payoff complementarities and financial fragility: evidence from mutual fund outflows. *Journal of Financial Economics*.
+- Christoffersen, P. (1998). Evaluating interval forecasts. *International Economic Review*.
+- Cont, R. (2001). Empirical properties of asset returns: stylized facts and statistical issues. *Quantitative Finance*.
+- Cont, R. and Schaanning, E. (2017). Fire sales, indirect contagion and systemic stress testing. Working paper.
+- Greenwood, R., Landier, A. and Thesmar, D. (2015). Vulnerable banks. *Journal of Financial Economics*.
+- Harris, L. (2003). *Trading and Exchanges*. Oxford University Press.
+- Kupiec, P. (1995). Techniques for verifying the accuracy of risk measurement models. *Journal of Derivatives*.
+- Shleifer, A. and Vishny, R. (1997). The limits of arbitrage. *Journal of Finance*.
+
+**Context:**
+- [CNBC-e, "SPK'nin yeni düzenlemesi sonrası gözler BIST 30'a çevrildi" (31/08/2026)](https://www.cnbce.com/borsa/spknin-yeni-duzenlemesi-sonrasi-gozler-bist-30a-cevrildi-g36156): new concentration limits for funds in low-free-float stocks.
+- SPK Bulletin 2026/61 (17/09/2026): liquidation of 131 investment funds.
+- Sources for the exchange rules are listed in [docs/design.md](docs/design.md#exchange-rules).

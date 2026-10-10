@@ -6,4 +6,6 @@ __pycache__/
 .ruff_cache/
 .coverage
 .DS_Store
-results/
+# keep the figures (the README shows them), not the data
+results/*
+!results/*.png
