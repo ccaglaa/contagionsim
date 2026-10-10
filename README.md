@@ -2,7 +2,7 @@
 
 An agent-based limit order book simulator of how a fund concentrated in illiquid stocks can turn a redemption run into a cross-asset fire sale. Inspired by the 2026 Turkish investment fund crisis. The model is stylized and does not represent any real fund or person.
 
-**Status:** work in progress. Done: matching engine, baseline market, fund build-up and unwind, multi-asset contagion with BIST-style rules, Q1 phase diagram, Q2 liquidation schedules, Q3 VaR backtest. Next: Q3 policy experiment, Q4 early warning.
+**Status:** work in progress. Done: matching engine, baseline market, fund build-up and unwind, multi-asset contagion with BIST-style rules, Q1 phase diagram, Q2 liquidation schedules, Q3 VaR backtest and policy experiment. Next: Q4 early warning.
 
 ## Questions
 
@@ -24,6 +24,7 @@ python experiments/m4_contagion.py    # contagion to the index, saves results/m4
 python experiments/q1_phase_diagram.py  # Q1 heatmap, 108 runs on all CPU cores (~3 min)
 python experiments/q2_liquidation.py    # Q2 liquidation schedules, 60 runs (~3 min on 8 cores)
 python experiments/q3_var_backtest.py   # Q3 VaR backtest, 20 runs (~1 min on 8 cores)
+python experiments/q3_policy.py         # Q3 policy experiment, 45 runs (~2 min on 8 cores)
 python -m pytest -m "not slow"        # quick test run (skips the ~30 s scenario test)
 ```
 
@@ -174,3 +175,30 @@ The calm runs are the control. A model that fails there is simply a bad model; a
 - **CORNER:** before the shock, at 95%, the normal and GARCH models are rejected for too few exceptions. The build-up period's volatility inflated their estimates, making them over-conservative.
 
 **Bug found while building this:** the first GARCH version started the variance recursion differently in estimation (sample variance) and in forecasting (long-run variance). On data with little clustering, the fit found degenerate parameters (alpha close to 0, beta close to 1, omega close to 0) whose long-run variance was near zero, so the VaR was 4 times too small. Variance targeting and a consistent starting point fixed it, and there is a regression test.
+
+## Q3 (policy): Which rules limit the contagion?
+
+`experiments/q3_policy.py` gives the naive fund (it dumps immediately) the M4 shock on day 8 and changes one rule at a time. Each policy uses 5 seeds.
+
+- **Cap phase-in:** the regulator lets the fund sell its CORNER excess over 1 or 3 days.
+- **Redemption gate:** at most 20% or 10% of NAV can be paid out per day, and the rest waits. Queued money is still owed, so it is subtracted from NAV.
+- **CORNER's segment:** a daily limit of +/-10% or +/-20%, or no limit at all.
+- **Index circuit breaker off.**
+
+![Q3 policy experiment](results/q3_policy.png)
+
+| Policy | Liquid stocks' drawdown | 5% index breaker | CORNER drawdown | Unpaid after 1 day (% of NAV) |
+|---|---|---|---|---|
+| Today's rules | 6.9% | 100% | 29% | 0 |
+| Cap phase-in, 1 or 3 days | 6.9% | 100% | 29% / 21% | 0 |
+| Gate 20% per day | 4.1% | 20% | 29% | 14 |
+| Gate 10% per day | 1.4% | 0% | 28% | 27 |
+| CORNER +/-10% / +/-20% / no limit | 6.9% / 6.3% / 6.9% | 100% | 21% / 32% / 52% | 0 |
+| No index breaker | 9.3% | n/a | 29% | 0 |
+
+**Findings (5 seeds).**
+- **Gates are the only rule here that stops the contagion,** because they work on its source: the redemptions. A 10% daily gate brings the liquid stocks back to no-shock levels, and the breaker never fires. The cost falls on investors: 27% of NAV still unpaid a day later. That trade-off is why regulators use gates (or suspensions, as in September 2026) only in emergencies.
+- **A cap phase-in protects the cornered stock but not the market.** Three days to comply cuts CORNER's fall from 29% to 21%, but the liquid stocks fall just as much: their selling comes from the redemptions, not from the cap.
+- **Price limits protect only the stock they apply to.** Without a limit CORNER falls 52%; with +/-10% it falls 21%. The liquid stocks barely change.
+- **The index breaker helps:** turning it off deepens the liquid stocks' fall from 6.9% to 9.3%. The halt forces the dumping fund to pause, which is the same mechanism as spreading sales in Q2. **Caveat:** in this model, market orders are refused during auctions, so the fund cannot sell into the reopening auction. A real fund could, so the size of this effect is partly a modelling choice.
+- **Connection to Q2:** everything that spreads the selling over time (a better schedule, a gate, a halt) reduces contagion. A fund that spreads its own sales (Q2) gets the gate's benefit without making investors wait.

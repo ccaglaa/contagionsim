@@ -11,6 +11,7 @@ requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.26",
     "scipy>=1.11",
+    "scikit-learn>=1.4",
 ]
 
 [project.optional-dependencies]
@@ -47,5 +48,5 @@ strict = true
 files = ["src"]
 
 [[tool.mypy.overrides]]
-module = ["scipy", "scipy.*"]
-ignore_missing_imports = true  # scipy ships without type information
+module = ["scipy", "scipy.*", "sklearn", "sklearn.*"]
+ignore_missing_imports = true  # these ship without type information
