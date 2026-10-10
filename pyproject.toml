@@ -22,7 +22,7 @@ dev = [
     "matplotlib>=3.8",
     "pytest>=8",
     "pytest-cov>=5",
-    "ruff>=0.6",
+    "ruff==0.16.8",  # pinned so local formatting matches CI
     "mypy>=1.10",
 ]
 

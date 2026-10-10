@@ -37,6 +37,7 @@ from contagionsim.orderbook import Side
 
 # Liquidation strategies
 
+
 class LiquidationStrategy(Protocol):
     def shares_to_sell(self, needed: int, market: Market) -> int:
         """How many of the `needed` shares to sell this step"""
@@ -51,6 +52,7 @@ class NaiveLiquidation:
 
 
 # Fund
+
 
 @dataclass(frozen=True, slots=True)
 class FundParams:

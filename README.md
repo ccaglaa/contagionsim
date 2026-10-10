@@ -18,41 +18,32 @@ The big stocks fall even though nothing is wrong with them. They fall because th
 
 ### 1. How big must the run be to break the market?
 
-**About 30% of the fund's money.** When investors withdraw 10% or less, the market barely notices. From 30%, the market falls 5% in a day and trading is halted market-wide, in every simulation where the fund owns a large share of the small stock. The more of it the fund owns, the worse the fall.
+**About 30% of the fund's money.** When investors withdraw 10% or less, the market barely notices. From 30%, the market usually falls far enough to halt trading market-wide. The more of the small stock the fund owns, the worse the fall.
 
-### 2. How should the fund sell?
+![Share of simulations that end in a market-wide halt, by size of the withdrawal](results/readme_q1.png)
 
-**Slowly.** Selling everything at once hurts the fund and the whole market. Spreading the same sales over half a day is enough to stop the damage.
+### 2. What limits the damage?
 
-| How the fund sells | Fall of the healthy big stocks | Market-wide halt |
-|---|---|---|
-| All at once | 6.9% | in every simulation |
-| Spread over half a day | 1.7% (same as a normal day) | never |
+**Slowing the selling down.** I replayed the same crisis, changing one thing at a time, and measured how far the healthy big stocks fell:
 
-### 3. Do standard risk models see it? Which rules help?
+![How far the healthy stocks fall under each rule or selling strategy](results/readme_rules.png)
 
-**The risk models do not see it.** A standard risk model (VaR) estimates the worst loss to expect 99 times out of 100. Three common versions work well in calm markets. In the crisis, the healthy stocks broke through that limit 13 to 18 times where about 4 were expected, and the worst moment lost 10 to 13 times more than the model allowed for.
+- **If the fund sells over half a day instead of all at once,** the healthy stocks fall no more than on a normal day, and trading is never halted.
+- **If investors can withdraw at most 10% of the fund per day,** the damage stops too, but investors wait: 27% of their money is still unpaid a day later.
+- **Giving the fund more time to cut its position does not help the market,** because the selling is driven by the withdrawals.
+- **The market-wide halt helps:** without it, the fall is deeper (9.3% instead of 6.9%), because the pause stops the fund from dumping.
 
-**Only limiting withdrawals stops the spread.** I changed one rule at a time:
+### 3. Do standard risk models see it?
 
-| Rule | Fall of the healthy big stocks | Market-wide halt | Cost |
-|---|---|---|---|
-| Today's rules | 6.9% | in every simulation | none |
-| Investors may withdraw at most 10% of the fund per day | **1.4%** | **never** | 27% of investors' money still waiting after a day |
-| Give the fund 3 days to cut its position | 6.9% | in every simulation | none |
-| No market-wide halt | 9.3% | none, by definition | none |
+**No.** Banks and funds use a risk model called VaR to estimate the worst loss to expect 99 times out of 100. Three common versions work well in calm markets. In the crisis, the healthy stocks broke through that limit 13 to 18 times where about 4 were expected, and the worst moment lost 10 to 13 times more than the model allowed for. The models learn from the past, and the past was calm.
 
 ### 4. Can you see the crash coming?
 
-I trained models to raise an alarm up to 50 minutes before a market-wide halt. To catch 8 crashes out of 10, each watcher has to accept some false alarms (an alarm when no crash follows):
+**Only someone who sees the withdrawals can.** I trained models to raise an alarm up to 50 minutes before a market-wide halt. To catch 8 crashes out of 10, each watcher has to accept some false alarms:
 
-| Who is watching | False alarms |
-|---|---|
-| Anyone, with a simple rule ("the market is already down a lot") | 44% of the time |
-| Anyone, with a machine-learning model on market data | 4% of the time |
-| **A regulator who also sees the fund's withdrawals** | **1% of the time** |
+![False alarms for each type of watcher](results/readme_q4.png)
 
-**The best warning comes from knowing who is withdrawing money, which the regulator sees and the market does not.**
+The market only sees the selling once it starts. The regulator sees investors asking for their money back before that, and this is what makes the warning reliable.
 
 ### The common lesson
 
@@ -84,6 +75,6 @@ python experiments/q3_policy.py          # question 3, rules (~2 min)
 python experiments/q4_early_warning.py   # question 4 (~7 min)
 ```
 
-Every run is seeded, so it gives the same numbers on any machine. Figures are saved to `results/`.
+Every run is seeded, so it gives the same numbers on any machine. Figures are saved to `results/`; `python experiments/readme_figures.py` redraws the three charts above.
 
 **Built with** Python, NumPy, SciPy and scikit-learn, with strict type checking (mypy), 132 automated tests and continuous integration on every push.

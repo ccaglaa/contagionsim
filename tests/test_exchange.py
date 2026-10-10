@@ -21,6 +21,7 @@ from contagionsim.orderbook import LimitOrderBook, Side
 
 # Book: bounds and auction mode
 
+
 def bid_ladder() -> LimitOrderBook:
     book = LimitOrderBook()
     for price in (1000, 995, 990):
@@ -107,6 +108,7 @@ def test_uncross_without_cross_just_resumes() -> None:
 
 
 # Market with Ana Pazar rules: limit 15%, circuit breaker 7.5%, 15+2 min auction
+
 
 def ana_market() -> Market:
     m = Market(1000, rules=ANA, clock=Clock(steps_per_day=1000, steps_per_minute=2))
@@ -199,6 +201,7 @@ def test_market_without_rules_behaves_like_m1_to_m3() -> None:
 
 # Exchange: shared cash, index, index circuit breaker, day roll
 
+
 def two_stock_exchange() -> Exchange:
     return Exchange(
         [
@@ -260,6 +263,7 @@ def test_new_day_resets_index_reference_and_stages() -> None:
 
 
 # Full simulation on two stocks
+
 
 def exchange_sim(seed: int) -> ExchangeSimulation:
     ex = two_stock_exchange()

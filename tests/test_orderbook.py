@@ -34,6 +34,7 @@ def lesson_book() -> tuple[LimitOrderBook, dict[str, int]]:
 
 # Empty book and market data
 
+
 def test_empty_book_has_no_quotes() -> None:
     book = LimitOrderBook()
     assert book.best_bid() is None
@@ -146,6 +147,7 @@ def test_trade_records_owners_and_aggressor(lesson_book) -> None:
 
 # Edge cases
 
+
 def test_market_order_on_empty_side_is_cancelled() -> None:
     book = LimitOrderBook()
     res = book.submit_market("x", Side.SELL, 100)
@@ -185,6 +187,7 @@ def test_bad_input_does_not_consume_an_id() -> None:
 
 # Cancel
 
+
 def test_cancel_removes_order_and_empty_level(lesson_book) -> None:
     book, ids = lesson_book
     assert book.cancel(ids["D"]) is True
@@ -219,6 +222,7 @@ def test_cancel_partially_filled_order(lesson_book) -> None:
 
 
 # Randomized stress test: thousands of random operations, invariants every step
+
 
 @pytest.mark.parametrize("seed", range(5))
 def test_random_operations_preserve_invariants(seed: int) -> None:

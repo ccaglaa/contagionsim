@@ -14,6 +14,7 @@ LIQ = ("L1", "L2", "L3", "L4")
 
 # Small hand-built exchange for unit tests
 
+
 def small_exchange() -> Exchange:
     listings = [Listing("CORNER", 1000, 200_000, ANA)]
     listings += [Listing(s, 1000, 2_000_000, YILDIZ) for s in LIQ]
@@ -67,6 +68,7 @@ def test_soft_close_blocks_subscriptions() -> None:
 
 
 # Scenario level
+
 
 def test_fund_invests_in_both_and_respects_its_limit() -> None:
     sim, fund = mini_bist(seed=1)
